@@ -1,0 +1,561 @@
+\documentclass[UTF8]{ctexart}
+\usepackage{hyperref}
+\usepackage{geometry}
+\usepackage{amsmath}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{caption}
+\usepackage{graphicx, subfig}
+
+\lstset{
+    numbers=left, 
+    numberstyle= \tiny, 
+    keywordstyle= \color{ blue!70},
+    commentstyle= \color{red!50!green!50!blue!50}, 
+    frame=shadowbox, 
+    rulesepcolor= \color{ red!20!green!20!blue!20} ,
+    escapeinside=``, 
+    xleftmargin=2em,xrightmargin=2em, aboveskip=1em,
+    framexleftmargin=2em
+} 
+
+\title{\Huge AES算法详解}
+\author{\large 宋林轲 2018K8009970020}
+\date{\large \today}
+
+\begin{document}
+
+
+\maketitle
+
+
+\tableofcontents
+
+\part{数学基础}
+\section{有限域}
+在了解AES算法之前，需对其数学基础有所涉猎。
+
+AES算法建立在有限域$GF(2^8)$之上，其运算满足域上的规则。在AES算法中主要使用的是加法运算和乘法运算，以及将二者结合后的矩阵运算。下面将在小节中分别介绍。
+\subsection{加法乘法运算}
+有限域$GF(2^8)$上的加法运算遵循模2加原则，即通过二进制表示时的逐位异或的方式计算结果。例如：$01010111 \oplus 10000011 = 11010100$。采用十六进制表示，即为：$0x57 \oplus 0x83 = 0xD4$。
+
+有限域$GF(2^8)$上的乘法运算则相对麻烦，以下面两个数为例：$A=(a_{0}a_{1} \cdots a_{7})_{2}$和$B=(b_{0}b_{1} \cdots b_{7})_{2}$。同时，定义一个存放长为8-bits的结果向量$C$，初始值为$0$。若以B为被乘数，从A的高位向低位遍历，若高位为1，则对$C$加上一个$B$,与此同时将$C$左移一位，$A$则向低位遍历一位，特别注意，由于是有限域$GF(2^8)$上的模乘，在左移$C$的过程中若出现高位溢出为1的情况，则需要减去8次不可约多项式对应的数$0x11B$，才能继续进行移位加法操作。最终多次加法移位后的结果$C$即为模乘后的结果。
+
+语言表述可能存在不精确的地方，具体细节请参阅代码部分。
+
+\subsection{矩阵运算}
+有限域$GF(2^8)$上的矩阵运算本质上是有限域上模乘和模2加的集合。以下面的$4 \times 4$矩阵为例：
+\begin{equation}
+\begin{bmatrix}
+  a_{0} & a_{1} & a_{2} & a_{3} \\
+  a_{4} & a_{5} & a_{6} & a_{7} \\
+  a_{8} & a_{9} & a_{10}& a_{11} \\
+  a_{12}& a_{13}& a_{14}& a_{15}
+\end{bmatrix}
+\cdot
+\begin{bmatrix}
+  b_{0} & b_{1} & b_{2} & b_{3} \\
+  b_{4} & b_{5} & b_{6} & b_{7} \\
+  b_{8} & b_{9} & b_{10}& b_{11} \\
+  b_{12}& b_{13}& b_{14}& b_{15}
+\end{bmatrix}
+=
+\begin{bmatrix}
+  c_{0} & c_{1} & c_{2} & c_{3} \\
+  c_{4} & c_{5} & c_{6} & c_{7} \\
+  c_{8} & c_{9} & c_{10}& c_{11} \\
+  c_{12}& c_{13}& c_{14}& c_{15}
+\end{bmatrix}
+\end{equation}
+\begin{equation}
+c_{ij}= \sum_{k}^{4} a_{ik} \cdot b_{kj}
+\end{equation}
+注：本公式均为有限域$GF(2^8)$之上的乘法和加法。
+\section{代码实现}
+下面分别给出了实现数学基础部分所用的函数，注释中可以提取出笔者的实现思路。
+\lstset{language = C}
+\begin{lstlisting}
+/* Author: Song link            *
+ * ID: 2018K8009970020          *
+ * MTA: module two add.         *
+ * quite easy to operate, so    *
+ * we use it as a preprocessor  *
+ * definition.                  */ 
+
+#define MTA(a, b)  (a ^ b)
+
+/* GF(2^8) multiply:                         *
+ * Use this as the multiplication method     *
+ * As mentioned above, to get the result     *
+ * ,we shift one of the number step by step  *
+ * from the highest bit to the lowest bit.   *
+ * When the result happens to be larger than *
+ * 0xff, add 0x11b to it.                    *
+ * To simplify this process, we transfer it  *
+ * into uint16_t beforehand.                 */
+
+static uint8_t GFM(uint8_t a, uint8_t b)
+{
+	uint16_t ar, br, rt;
+	ar = (uint16_t)a;
+	br = (uint16_t)b;
+	rt = 0;
+	while(ar)
+	{
+		if(ar & 1)
+		{
+			rt = rt ^ br;
+		}
+		br <<= 1;
+		if(br >= 0x100)
+		{
+			br = br ^ 0x11b;
+		}
+		ar >>= 1;
+	}
+	return (uint8_t) rt;
+}
+
+/* Multiplication for Matrix:             *
+ * As mentioned above, we put two arrays  *
+ * to compute the vector used in Matrix   *
+ * Multiplication.                        */
+
+static uint8_t Matx_Multi(uint8_t c[], uint8_t a[])
+{
+	int i;
+	uint8_t ret = 0x00;
+	for(i = 0; i < 4; i++)
+	{
+		ret = MTA(GFM(c[i], a[i]), ret);
+	}
+	return ret;
+}
+\end{lstlisting}
+\part{算法内容}
+AES算法涉及多个步骤，总体而言分为完整的轮秘钥操作和最后一轮秘钥操作。根据不同大小的秘钥，采用的轮数和其它部分参数会有细微不同，本文为了方便起见，采用秘钥长度和明文长度均为16字节的情况。
+\section{步骤分解}
+以初始秘钥长度和明文长度块均为16字节为例，在此情况中AES的加密包含10次的完整加密轮和1次最后加密轮。完整的加密轮包含下面几个步骤：字节代换，行移位，列混合，秘钥加。最后加密轮则包含下面几个步骤：字节代换，行移位，秘钥加。然而，秘钥的长度本身不能支持如此多轮的秘钥加操作，因此，我们需要对输入的秘钥进行扩展，再去实现轮函数加密。
+\subsection{扩展}
+严格意义上的扩展包含两个部分。AES的加密会对明文进行分割，如果明文组出现不足16字节的情况，将会自动扩展至16字节以便之后的加密，这里便不再赘述。另一层意义上则是利用输入的16字节的秘钥扩展至多轮不相同的秘钥，以便每次进行轮函数加密使用。
+
+下面将详细说明16字节轮秘钥的扩展：
+
+首先，扩展秘钥需要从原秘钥中读取种子。利用二维数组$expkey[N_{k}][MaxLen]$来存放相关信息。二维数组的每一行均存放秘钥的其中四个字节，记作$W[i]$行，扩展则是以每一行四个字节作为基本单位进行的。
+
+在将种子秘钥的16字节填入后，之后的扩展遵循下列法则：若行的序号不是4的倍数，如$W[i]$中$i \% N_{k} !=0$的情况,则$W[i]$的取值为$W[i] = W[i-N_{k}] \oplus W[i-1]$。$N_{k}$这里取4,表示上一个秘钥的同一行。若行的序号是4的倍数，则需要通过某个函数生成秘钥。此情况相对复杂，请参考本处所做的注释和相关的文献资料。
+
+利用上述方式扩展至$N_{b} \times (N_{r} + 1)$行时，全部的秘钥扩展即可结束。
+
+以下提供该环节的代码。
+\lstset{basicstyle = \scriptsize}
+\begin{lstlisting}
+/* KeyExpand: Expand the key for the upcoming steps   *
+ * We first use a 2-dimension array to store all the  *
+ * information of the expand-key.                     *
+ * When i % 4 == 0, it is a little troublesome        *
+ * We get a Rcon[] array to get the key-constant here *
+ * By rotbyte and array_MTA and finally ByteSub(S_box)*
+ * We can get the result. The output is stored in exp_*
+ * key.  BTW.                                         *
+ * For more information about the Rcon[], please refer*
+ * to aes.h and the formal pdf .                      */
+
+static void KeyExpand(uint8_t key[], uint8_t exp_key[][MaxLen])
+{
+	uint8_t i, j;
+	uint8_t temp[MaxLen] = {0};
+	for(i = 0; i < Nk; i++)
+		for(j = 0; j < 4; j++)
+			exp_key[i][j] = key[4 * i + j];
+	
+	for(i = Nk; i < Nb * (Nr + 1); i++)
+	{
+		memcpy(temp, exp_key[i - 1], Width);
+		if(i % Nk == 0)
+		{	
+			uint8_t Rcon[] = {RC_Store[i / Nk], 0x00, 0x00, 0x00};
+			RotByte(temp);
+			Array_MTA(temp, Rcon, temp, Width);
+			ByteSub(temp, Width);
+		}
+		Array_MTA(exp_key[i - Nk], temp, exp_key[i], Width);
+		memset(temp, 0, sizeof(temp));  
+	}
+}
+\end{lstlisting}
+\subsection{字节代换}
+字节代换是加密的第一步，即通过某个$Sbox$沙盒实现对信息的置换，一般会通过构造非线性映射的方式来实现乱序，保证安全。由于置换表过大，此处文档不会给出置换表。
+
+总而言之，对于输入的信息数组$in[]$的其中一个元素$i$，该步骤将会通过$Sbox$在同一个位置利用$Sbox[in[i]]$来替换原本的元素。
+
+对应的，解密时将会使用逆数组$invSbox[]$来实现快速还原解密。
+\begin{lstlisting}
+/* ByteSub: change the plaintxt                  *
+ * very easy. BTW, s_box is put                  *
+ * in the aes.h,U can refer to it                *
+ * Rv_ByteSub is another s_box contrary to s_box *
+ * We won't shown here.                          */
+
+static void ByteSub(uint8_t in[], uint8_t len)
+{
+	int i;
+	for(i = 0; i < len; i++)
+	{
+		in[i] = s_box[in[i]];
+	}
+}
+\end{lstlisting}
+\subsection{行移位}
+对于16字节的文本和秘钥，行移位遵循下面的原则。
+
+利用循环的方式对后三行分别左移1位，2位，3位，即可完成该步骤。
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=.8\textwidth]{1.png} 
+  \caption{行移位操作} 
+  \label{img} 
+\end{figure}
+
+\begin{lstlisting}
+/* ShiftRow: shift the row of the matrix *
+ * count the row number, and shift it to *
+ * the left due to the number we get     */
+
+static void ShiftRow(uint8_t in[])
+{
+	int i, k, j;
+	uint8_t tmp;
+	for(i = 1; i < 4; i++)
+	{
+		k = 0;
+		while(k < i)
+		{
+			tmp = in[Nb * i];
+			for(j = 1; j < Nb; j++)
+			{
+				in[Nb * i + j - 1] = in[Nb * i + j];
+			}
+			in[Nb * i + Nb - 1] = tmp;
+			k++;
+		}
+	}
+}
+\end{lstlisting}
+\subsection{列混合}
+列混合操作涉及有限域$GF(2^8)$的加法和乘法运算。利用下面的行向量$\vec{x}=(0x02,0x03,0x01,0x01)$的移位，得到下面的M矩阵。并用先前的文本与之相乘进行加密。
+\begin{equation}
+M \cdot A =
+\begin{bmatrix}
+  0x02& 0x03& 0x01& 0x01\\
+  0x01& 0x02& 0x03& 0x01\\
+  0x01& 0x01& 0x02& 0x03\\
+  0x03& 0x01& 0x01& 0x02
+\end{bmatrix}
+\cdot 
+\begin{bmatrix}
+  a_{0} & a_{1} & a_{2} & a_{3} \\
+  a_{4} & a_{5} & a_{6} & a_{7} \\
+  a_{8} & a_{9} & a_{10}& a_{11} \\
+  a_{12}& a_{13}& a_{14}& a_{15}
+\end{bmatrix}
+=
+\begin{bmatrix}
+  b_{0} & b_{1} & b_{2} & b_{3} \\
+  b_{4} & b_{5} & b_{6} & b_{7} \\
+  b_{8} & b_{9} & b_{10}& b_{11} \\
+  b_{12}& b_{13}& b_{14}& b_{15}
+\end{bmatrix}
+\end{equation}
+对应的，解密使用的行向量$\vec{y}=(0x0E,0x0B,0x0D,0x09)$同样通过拼接和移位得到下面的N矩阵。不难验证在有限域$GF(2^8)$下这两个矩阵是互逆的，因此可以通过M矩阵和N矩阵的相乘还原原文。
+\begin{equation}
+\begin{aligned}
+N \cdot M \cdot A &= 
+\begin{bmatrix}
+  0x0E& 0x0B& 0x0D& 0x09\\
+  0x09& 0x0E& 0x0B& 0x0D\\
+  0x0D& 0x09& 0x0E& 0x0B\\
+  0x0B& 0x0D& 0x09& 0x0E
+\end{bmatrix}
+\cdot
+\begin{bmatrix}
+  0x02& 0x03& 0x01& 0x01\\
+  0x01& 0x02& 0x03& 0x01\\
+  0x01& 0x01& 0x02& 0x03\\
+  0x03& 0x01& 0x01& 0x02
+\end{bmatrix}
+\cdot 
+\begin{bmatrix}
+  a_{0} & a_{1} & a_{2} & a_{3} \\
+  a_{4} & a_{5} & a_{6} & a_{7} \\
+  a_{8} & a_{9} & a_{10}& a_{11} \\
+  a_{12}& a_{13}& a_{14}& a_{15}
+\end{bmatrix} 
+\\
+\\
+&=I \cdot A = A
+\end{aligned}
+\end{equation}
+此部分代码相对复杂，请看注释部分。
+\lstset{basicstyle = \tiny}
+\begin{lstlisting}
+/* coef_mult: multiplication for the matrix    *
+ * TO SIMPLIFY IT, I DIDN'T USE polynomials    *
+ * I Just count them all out.                  *
+ * please refer to the equation I given above  */
+
+static void coef_mult(uint8_t *a, uint8_t *b, uint8_t *d) 
+{
+	d[0] = GFM(a[0], b[0]) ^ GFM(a[1], b[1]) ^ GFM(a[2], b[2]) ^ GFM(a[3], b[3]);
+	d[1] = GFM(a[3], b[0]) ^ GFM(a[0], b[1]) ^ GFM(a[1], b[2]) ^ GFM(a[2], b[3]);
+	d[2] = GFM(a[2], b[0]) ^ GFM(a[3], b[1]) ^ GFM(a[0], b[2]) ^ GFM(a[1], b[3]);
+	d[3] = GFM(a[1], b[0]) ^ GFM(a[2], b[1]) ^ GFM(a[3], b[2]) ^ GFM(a[0], b[3]);
+}
+/* MixColumn: Mix the column    *
+ * Mind the column and the row  *
+ * the main difference is that  *
+ * we compute column vectors for*
+ * A matrix, for N, M matrix    *
+ * we compute the row vectors,  *
+ * which is in accordance with  *
+ * Matrix multiplication...     */
+
+static void MixColumn(uint8_t in[])
+{
+	uint8_t a[] = {0x02, 0x03, 0x01, 0x01}; 
+	uint8_t i, j, col[4], res[4];
+
+	for (j = 0; j < Nb; j++) {
+		for (i = 0; i < 4; i++) {
+			col[i] = in[Nb * i + j];
+		}
+
+		coef_mult(a, col, res);
+
+		for (i = 0; i < 4; i++) {
+			in[Nb * i + j] = res[i];
+		}
+	}
+}
+\end{lstlisting}
+\subsection{秘钥加}
+秘钥加环节非常简单，通过秘钥扩展后得到的秘钥与需加密的信息进行一次异或，即可实现。此处不再赘述。唯一需要注意的是秘钥的挑选。这里直接看代码部分。
+\begin{lstlisting}
+/* AddRoundKey: Simply add the key here.  *
+ * Very common                            */
+
+static void AddRoundKey(uint8_t in[], uint8_t key[], uint8_t len)
+{
+	int i;
+	for(i = 0; i < len; i++)
+	{
+		in[i] = MTA(in[i], key[i]);
+	}
+}
+\end{lstlisting}
+\section{步骤组合}
+以上梳理了AES加密的全部单位操作过程，下面将其组合以供使用。
+\subsection{加密周期}
+完整的加密周期包含字节代换，行移位，列混合以及秘钥加。而最后一轮则是不需要采用列混合，因此代码撰写如下。
+\begin{lstlisting}
+/* OneFullRound:   *
+ * FinalRound:     *
+ * QUITE EASY      */
+
+static void OneFullRound(uint8_t in[], uint8_t key[])
+{
+	ByteSub(in, Nb * Width);
+	ShiftRow(in);
+	MixColumn(in);
+	AddRoundKey(in, key, Nb * Width);
+}
+
+static void FinalRound(uint8_t in[], uint8_t key[])
+{
+	ByteSub(in, Nb * Width);
+	ShiftRow(in);
+	AddRoundKey(in, key, Nb * Width);
+}
+\end{lstlisting}
+\subsection{解密周期}
+完整的解密周期则是完整加密周期的逆向处理，先进行秘钥加，再通过列混合，行移位，以及字节代换。因此，代码撰写如下。
+\begin{lstlisting}
+/* Rv_FinalRound:            *
+ * Rv_OneFullRound:          *
+ * Quite easy: but mind that *
+ * Rv_FinalRound is the first*
+ * Step.                     */
+
+static void Rv_FinalRound(uint8_t in[], uint8_t key[])
+{
+	AddRoundKey(in, key, Nb * Width);
+	Rv_ShiftRow(in);
+	Rv_ByteSub(in, Nb * Width);
+}
+
+static void Rv_OneFullRound(uint8_t in[], uint8_t key[])
+{
+	AddRoundKey(in, key, Nb * Width);
+	Rv_MixColumn(in);
+	Rv_ShiftRow(in);
+	Rv_ByteSub(in, Nb * Width);
+}
+\end{lstlisting}
+\section{加解密代码实现}
+现在做好了准备，可以撰写加密和解密函数了，同时，我们可以提供16字节长度的测试用例。
+该程序扩展并不难，但基础功能的实现只需看16字节的情况即可验证。
+
+下面是主体函数和调用的关键函数：
+\begin{lstlisting}
+
+/* main function:                                          *
+ * 	Init: alloc space and set all to 0.                    *
+ *  Read_plain: read plaintext from a file on a given path *
+ *  Read_key: read the 16 bytes key.                       *
+ *  KeyExpand: Expand the key.                             *
+ *  Rijndael: finish the encode work. Shown below.         *
+ *  Rv_Rijndael: finish the decode work. Shown below.      *
+ *  Showchar: show the output in "char" forms.             */
+
+int main(void)
+{
+	Init();
+	Read_plain(in);
+	Read_key(key);
+	KeyExpand(key, exp_key);
+	printf("Encode result:\n");
+	Rijndael(in);
+	PriArray(in, Width * Nb);
+	Rv_Rijndael(in);
+	printf("Decode result:\n");
+	PriArray(in, Width * Nb);
+	Showchar(in, Width * Nb);
+}
+
+/* Rijndael: ENCODE                          *
+ *   Select the key for encoding.            *
+ *   AddRoundKey: first step.                *
+ *   10 times OneFullRound.                  *
+ *   1 time  FinalRound                      */
+
+static void Rijndael(uint8_t in[])
+{
+	int rd;
+	Key_Select(0, sel_key, exp_key);
+	AddRoundKey(in, sel_key, Nk * Width);
+	memset(sel_key, 0, sizeof(sel_key));
+	for(rd = 1; rd < Nr; rd++)
+	{
+		Key_Select(rd, sel_key, exp_key);
+		OneFullRound(in, sel_key);
+		memset(sel_key, 0, sizeof(sel_key));
+	}
+	Key_Select(Nr, sel_key, exp_key);
+	FinalRound(in, sel_key);
+	return ;
+}
+
+/* Rv_Rijndael:                            *
+ *    Mirror image of the Rijndael         */
+static void Rv_Rijndael(uint8_t in[])
+{
+	int rd;
+	Key_Select(Nr, sel_key, exp_key);
+	Rv_FinalRound(in, sel_key);
+	for(rd = Nr - 1; rd > 0; rd--)
+	{
+		Key_Select(rd, sel_key, exp_key);
+		Rv_OneFullRound(in, sel_key);
+	}
+	Key_Select(rd, sel_key, exp_key);
+	AddRoundKey(in, sel_key, Nk * Width);
+}
+\end{lstlisting}
+下面展示实验结果。
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=.8\textwidth]{2.png} 
+  \caption{16比特加密结果} 
+  \label{img} 
+\end{figure}
+
+\part{优化与性能比较}
+仔细查阅上述加密过程，寻找可以被优化的部分。可见最耗时的步骤是列混合阶段。若能够加快这一过程，将会大大提高程序运行的速度。之后，将利用计时器和相关的评测器来检测性能地提高水准。
+\section{优化}
+针对加密的优化，可以尝试将所有的步骤组合在一起，利用一条式子进行全部的运算。同时，为了避免系统进行乘法这一开销较大的运算，可以通过事先构造表格，通过输入进行查阅的方式，撤除乘法运算，仅通过加法和查阅，将矩阵运算的速度提高。
+
+记录M和N矩阵的生成的向量如下：
+$\vec{x}=(0x02,0x03,0x01,0x01)$以及
+
+$\vec{y}=(0x0E,0x0B,0x0D,0x09)$。
+
+通过构造数据表，利用小程序打印所有的可能情况，并与输入一一对应，可以得到类似如下的表格。
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=.8\textwidth]{3.png} 
+  \caption{存储的运算结果数组} 
+  \label{img} 
+\end{figure}
+声明如下：本次实验生成的表格有$T02Quick[]$,$T03Quick[]$等存储运算结果的数组，表示与数据$0x02$和$0x03$及其他数据相乘后得到的结果。通过此方法可以加快矩阵元素计算的速度。
+
+与此同时，记录移位和进行$SubByte$查阅操作对原输入的影响，记录各个字节的位置，利用枚举法将16个字节的变换关系给出。
+示例如图4所示。
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=.8\textwidth]{4.png} 
+  \caption{枚举法示例图} 
+  \label{img} 
+\end{figure}
+
+\section{性能测试比较}
+由于并不涉及较复杂的乘法运算，计算秘钥拓展所耗费的时间则忽略不计，利用计时器机制来计算运行的总时间。在加密前开始计时，在解密后结束计时，打印相关的信息。
+
+部分代码如下：
+\begin{lstlisting}
+int main(void)
+{
+	Init();
+	Read_plain(in);
+	Read_key(key);
+	KeyExpand(key, exp_key);
+	clock_t start, end;
+	printf("Encode result:\n");
+	start = clock();
+	Rijndael(in);
+	//PriArray(in, Width * Nb);
+	Rv_Rijndael(in);
+	end = clock();
+	printf("clock tick: %ld\n", end -start);
+	printf("Decode result:\n");
+	PriArray(in, Width * Nb);
+	Showchar(in, Width * Nb);
+}
+\end{lstlisting}
+利用此代码对16字节的加解密速度进行比较，得到结果如下图5和图6所示，分别是正常运算流程和压缩查表运算流程：
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=.8\textwidth]{5.png} 
+  \caption{正常运算流程} 
+  \label{img} 
+\end{figure}
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=.8\textwidth]{6.png} 
+  \caption{压缩查表运算流程} 
+  \label{img} 
+\end{figure}
+事先已经验证二者在相同输入的情况下结果是一致的，
+从得到的clock \ \ tick数值来看，二者运行的结果相同，即便对应的只有16字节数据的加解密流程，也能看到后者通过查表的方式其运算速率有明显的提高。在第二个程序中，笔者为了一致性和强迫症，将本来不需要查表的$0x01$情况也通过查表进行处理了。在这么做的情况下依旧能够看到速度有巨大的提高。
+
+本实验的普遍性情况其实并不需要证明，利用类似的方式对长字节进行加密和解密，依据算法判断，其运行时间是16字节作为单元的简单相加，因此扩展该程序为输入任意长度字节均可进行加密的情况并不会影响最终的速率对比关系。
+
+至此，实验结束。
+
+参考资料：
+
+《现代密码学基础》 杨波 （第四版）
+\end{document}
