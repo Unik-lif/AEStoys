@@ -1,5 +1,5 @@
 ## AES-encode-and-decode-in-2-ways
-AES的两种不同实现方式，后者是对前者的优化
+AES的两种不同实现方式，思路很简单，TMTO罢了
 
 
 本压缩包包含latex组件和生成的pdf一份，	以及两份源码：
